@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<head>
+  <title>lisp information</title>
+</head>
+<h1>Recent Lisp Information from Qiita and stackoverflow</h1>
+<ul>
+  <% @loop article %>
+  <li>
+    <p><% @var updated_at %></p>
+    <table>
+      <tr>
+        <th>title:</th>
+        <td><% @var title %></td>
+      </tr>
+      <tr>
+        <th>author:</th>
+        <td><% @var author_name %></td>
+      </tr>
+      <tr>
+        <th>url:</th>
+        <td><a href="<% @var url %>"><% @var url %></a></td>
+      </tr>
+    </table>
+  </li>
+  <% @endloop %>
+</ul>
+
+

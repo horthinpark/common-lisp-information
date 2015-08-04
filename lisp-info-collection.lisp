@@ -2,11 +2,13 @@
 (ql:quickload :yason)
 (ql:quickload :alexandria)
 (ql:quickload :cxml)
+(ql:quickload :ningle)
+(ql:quickload :cl-emb)
 
-;デフォルトのエンコードを指定
+;define default encoding
 (setf drakma:*drakma-default-external-format* :utf-8)
 
-; ボディを文字列で取得するために、テキストとして判定される Content-Type を追加
+; to get body in string, add the Content-Type as text
 (pushnew '("application" . "json") drakma:*text-content-types* :test #'equal)
 
 (defvar *unix-epoch-difference*
@@ -14,8 +16,6 @@
 
 (defun unix-to-universal-time (unix-time)
     (+ unix-time *unix-epoch-difference*))
-
-(defparameter *article-bucket* (make-array 5 :fill-pointer 0 :adjustable t))
 
 (defun date-to-universal-time (date)
   (encode-universal-time (parse-integer (subseq date 17 19)) (parse-integer (subseq date 14 16)) (parse-integer (subseq date 11 13)) (parse-integer (subseq date 8 10)) (parse-integer (subseq date 5 7)) (parse-integer (subseq date 0 4)) 9))
@@ -31,18 +31,22 @@
             year
             hr min sec)))
 
+(defparameter *article-bucket* (make-array 5 :fill-pointer 0 :adjustable t))
+
+
 ;------qiita---------
+;access qiita
 (multiple-value-bind (body status)
     (drakma:http-request "https://qiita.com/api/v1/tags/common-lisp/items")
   (when (= status 200)
     (defvar *qiita-json-array* body)))
 
-;連想配列の形をした文字列をhashtabeのベクターのs式に
+;json-array to hash table array
 (let* ((yason:*parse-json-arrays-as-vectors* t)
        (qiita-article-array (yason:parse *qiita-json-array*)))
   (defparameter *qiita-article-array* qiita-article-array))
 
-;qiita-article-arrayから必要な情報を抽出
+;get necessary information from *qiita-article-array* and push to *article-bucket*
 (loop for article across *qiita-article-array* do
   (let* ((id (gethash "id" article))
          (updated_at (gethash "updated_at" article))
@@ -60,16 +64,19 @@
     (vector-push-extend article_table *article-bucket*)))
 
 
+
 ;-------stackoverflow-----------
+;access stackoverflow 
 (multiple-value-bind (body status)
     (drakma:http-request "https://api.stackexchange.com/2.2/questions?page=1&pagesize=50&order=desc&sort=activity&tagged=common-lisp&site=stackoverflow")
   (when (= status 200)
-    (defparameter *stackoverflow-json-array* body)))
+    (defvar *stackoverflow-json-array* body)))
 
-(defparameter *stackoverflow-articles-array* (gethash "items" (yason:parse *stackoverflow-json-array*)))
+;json-array to array
+(defparameter *stackoverflow-article-array* (gethash "items" (yason:parse *stackoverflow-json-array*)))
 
-(loop for article in *stackoverflow-articles-array* do
-  (print article)
+;get necessary information from *stackoverflow-article-array* and push to *article-bucket*
+(loop for article in *stackoverflow-article-array* do
      (let ((owner (gethash "owner" article))
            (id (gethash "question_id" article))
            (is_answered (gethash "is_answered" article))
@@ -85,14 +92,20 @@
          (setf (getf article_table :author_name) author_name)
     (vector-push-extend article_table *article-bucket*))))
 
-;---sort-----
+
+;---sorting-----
+;sort *article-bucket*'s article by date
 (defparameter *sorted_article_bucket*  (sort *article-bucket* #'> :key #'(lambda (article) (getf article :updated_at))))
 
-;------display---------
+;change universaltime to date
 (loop for article across *sorted_article_bucket* do
-  (let* ((universal_updated_at (getf article :updated_at))
-        (url (getf article :url))
-        (title (getf article :title))
-         (author_name (getf article :author_name))
-         (updated_at (universal-time-to-date universal_updated_at)))
-    (format t "update_at: ~A~%user: ~A~%title: ~A~%url: ~A~%~%~%" updated_at author_name title url)))
+      (setf (getf article :updated_at) (universal-time-to-date (getf article :updated_at))))
+
+;give a article property to *sorted_article_bucket*
+(defparameter *sorted_article_bucket_with_property* (list :article (coerce *sorted_article_bucket* 'list)))
+
+(defvar *app* (make-instance 'ningle:<app>))
+(clack:clackup *app*)
+(setf (ningle:route *app* "/")
+      #'(lambda (params)
+                    (cl-emb:execute-emb #P"lisp-info-index.tmpl" :env *sorted_article_bucket_with_property*)))
